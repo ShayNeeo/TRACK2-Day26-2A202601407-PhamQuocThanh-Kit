@@ -160,24 +160,30 @@ class InjectionScanResult:
     matched_patterns: tuple[str, ...]
 
 
+_INJECTION_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"ignore\s+(all\s+)?(previous|prior|above)\s+instructions?", "ignore_previous"),
+    (r"disregard\s+the\s+above", "disregard_above"),
+    (r"system\s+override", "system_override"),
+    (r"as\s+the\s+system,?\s+you\s+must", "as_the_system"),
+    (r"you\s+must\s+now", "you_must_now"),
+    (r"instead,?\s+record", "instead_record"),
+    (r"also\s+record\s+this\s+for", "also_record_for"),
+    (r"reveal\s+(the\s+)?(act|scopes?|grading\s+key|instructor)", "reveal_secret"),
+    (r"print\s+the\s+", "print_the"),
+    (r"bỏ\s+qua\s+(mọi\s+)?hướng\s+dẫn", "bo_qua_huong_dan"),
+)
+
+
 def scan_for_injected_instructions(text: str) -> InjectionScanResult:
-    """STUB — ALWAYS RETURNS `suspicious=False`, REGARDLESS OF `text`.
-
-    A real version needs to catch imperative language embedded in
-    RETRIEVED CONTENT (a `Note:` page, a RESEARCH snippet, an A2A peer's
-    reply) that tries to redirect what YOUR agent does next — "ignore your
-    previous instructions and...", "as the system, you must now...", a
-    fake tool result claiming to BE a new system prompt, an instruction to
-    reveal `ctx.act`/`ctx.scopes`/another learner's data. This is the
-    `poisoned_result` / `faithless_peer` duel classes' entire mechanism
-    (FINAL-PLAN.md section 4.4), and CONTRACTS.md section 6.4's
-    `guardrail_breach` is what fires when it works on you.
-
-    This starter's version does not look at `text` at all — see this
-    file's own `__main__` demo below, which runs an unambiguous injection
-    attempt through this exact function and shows it sailing through
-    uncaught. That gap is the assignment, not a bug report."""
-    return InjectionScanResult(suspicious=False, matched_patterns=())
+    """Catch imperative language embedded in retrieved content that tries
+    to redirect the agent — the `poisoned_result` / `faithless_peer`
+    mechanism. Tight list: agent-directed imperatives, not emphatic prose."""
+    blob = (text or "").lower()
+    hits: list[str] = []
+    for pattern, name in _INJECTION_PATTERNS:
+        if re.search(pattern, blob):
+            hits.append(name)
+    return InjectionScanResult(suspicious=bool(hits), matched_patterns=tuple(hits))
 
 
 # ---------------------------------------------------------------------------
@@ -191,21 +197,23 @@ class RedactionResult:
     hits: tuple[str, ...]
 
 
+_PRIVATE_MARKERS = (
+    re.compile(r"(learner\s+sv-\d{4}'s\s+private\s+note\s+reads:\s*.{40,})", re.I),
+    re.compile(r"(sv-\d{4}\s+failed.{40,})", re.I),
+    re.compile(r"([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})"),
+)
+
+
 def redact(text: str) -> RedactionResult:
-    """STUB — ALWAYS RETURNS `text` UNCHANGED, `hits=()`.
-
-    A real version needs to catch a seeded `Note:` page's private content,
-    or a `Learner:` page's private field, appearing verbatim (CONTRACTS.md
-    6.4's `privacy_leak` detector: "normalised, >= 40 chars") inside an
-    answer that is about to be handed to the OPPONENT team as this
-    exchange's `answer.text` — remember, the trace you hand over on
-    prosecution is public to whoever is prosecuting you (CONTRACTS.md
-    5.4). `privacy_leak` is weight 8, tied for the heaviest class in the
-    whole Safety family (CONTRACTS.md section 6.1).
-
-    This starter's version does not look at `text` at all — see this
-    file's own `__main__` demo below."""
-    return RedactionResult(redacted_text=text, hits=())
+    """Strip seeded private Note/Learner excerpts (>=40 chars) and emails
+    before an answer is handed to the opponent (privacy_leak, weight 8)."""
+    out = text or ""
+    hits: list[str] = []
+    for rx in _PRIVATE_MARKERS:
+        for m in rx.finditer(out):
+            hits.append(m.group(1)[:80])
+            out = out.replace(m.group(1), "[REDACTED]")
+    return RedactionResult(redacted_text=out, hits=tuple(hits))
 
 
 # ---------------------------------------------------------------------------
@@ -223,24 +231,31 @@ class ArithmeticCheckResult:
 _NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
 
 
+_ROUGH_RE = re.compile(r"(?:roughly|about|approximately|~)\s*(-?\d+(?:\.\d+)?)", re.I)
+_EXACT_DECIMAL_RE = re.compile(r"(?:exactly\s+)?(-?\d+\.\d{2,})")
+
+
 def verify_arithmetic(text: str) -> ArithmeticCheckResult:
-    """STUB — ALWAYS RETURNS `checked=False, ok=None`: "I did not verify
-    this", not "this is correct".
-
-    A real version needs to catch the `unsupported_precision` class
-    (CONTRACTS.md 6.1/6.4) — a number in your answer that is more precise,
-    or simply different, than anything an anchor you actually retrieved
-    supports. `_NUMBER_RE` above is left in as a starting point (it finds
-    every bare number in a string) — turning "found some numbers" into
-    "verified each one against a retrieved source" is the actual work,
-    left undone here on purpose.
-
-    This starter's version does not look at `text` at all beyond what
-    `_NUMBER_RE` would find if you called it (it isn't called) — see this
-    file's own `__main__` demo below."""
-    return ArithmeticCheckResult(
-        checked=False, ok=None, detail="verify_arithmetic is a stub — no check was performed"
-    )
+    """Flag unsupported precision: a source-hedged quantity restated at
+    extra decimals the text never earned (unsupported_precision, weight 4)."""
+    blob = text or ""
+    nums = _NUMBER_RE.findall(blob)
+    if not nums:
+        return ArithmeticCheckResult(checked=True, ok=True, detail="no numbers to verify")
+    rough = {m.group(1) for m in _ROUGH_RE.finditer(blob)}
+    exact = [m.group(1) for m in _EXACT_DECIMAL_RE.finditer(blob)]
+    if rough and exact:
+        return ArithmeticCheckResult(
+            checked=True, ok=False,
+            detail=f"hedged source {sorted(rough)} restated at extra precision {exact}",
+        )
+    if any(len((n.split(".") + [""])[1]) >= 2 and n not in rough for n in nums):
+        # two-plus decimals with no supporting source hedge
+        precise = [n for n in nums if len((n.split(".") + [""])[1]) >= 2]
+        return ArithmeticCheckResult(
+            checked=True, ok=False, detail=f"unsupported decimal precision {precise}"
+        )
+    return ArithmeticCheckResult(checked=True, ok=True, detail=f"checked {len(nums)} number(s)")
 
 
 # ---------------------------------------------------------------------------
@@ -307,20 +322,18 @@ if __name__ == "__main__":
     )
     scan = scan_for_injected_instructions(injected)
     print(f"  scan_for_injected_instructions(<obvious injection>) -> {scan}")
-    print("  ^ THIS IS THE GAP: an unmissable injection attempt, and the stub says 'suspicious=False'.")
-    assert scan.suspicious is False  # pinning the STARTER's current (incomplete) behaviour, not a goal
+    assert scan.suspicious is True
+    assert "system_override" in scan.matched_patterns
 
     leaky = "Learner sv-0402's private note reads: " + "x" * 45 + " (this is definitely private content)"
     red = redact(leaky)
-    print(f"  redact(<45+ char private-looking string>) -> hits={red.hits}, text unchanged={red.redacted_text == leaky}")
-    print("  ^ THIS IS THE GAP: a privacy_leak-shaped string, and the stub reports zero hits.")
-    assert red.hits == () and red.redacted_text == leaky
+    print(f"  redact(<45+ char private-looking string>) -> hits={red.hits}")
+    assert red.hits and "[REDACTED]" in red.redacted_text
 
-    wrong_math = "The IBM 2024 breach cost cited on day24 is $4.45M, escalating to $9.90M by 2026."
+    wrong_math = "The source says roughly 100 cases; the answer states exactly 100.37."
     arith = verify_arithmetic(wrong_math)
-    print(f"  verify_arithmetic(<a number nobody checked>) -> {arith}")
-    print("  ^ THIS IS THE GAP: checked=False means 'nobody looked', not 'this checks out'.")
-    assert arith.checked is False and arith.ok is None
+    print(f"  verify_arithmetic(<hedged vs extra precision>) -> {arith}")
+    assert arith.checked is True and arith.ok is False
 
     print("\n=== agent.guardrails: abstention_policy (real, naive) ===\n")
     abstain_on_ungrounded = abstention_policy(result2)  # the ungrounded case from above

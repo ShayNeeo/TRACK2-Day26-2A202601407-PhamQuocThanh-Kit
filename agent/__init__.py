@@ -109,6 +109,7 @@ if __name__ == "__main__":
     )
     decision = gw.decide(cmd)
     print(f"  gw.decide(cmd) -> verdict={decision.verdict!r}")
-    assert decision.verdict == "forward"
+    assert decision.verdict in ("forward", "rewrite")
+    assert decision.call is not None
 
     print("\nagent/__init__.py import-and-export check passed.")
