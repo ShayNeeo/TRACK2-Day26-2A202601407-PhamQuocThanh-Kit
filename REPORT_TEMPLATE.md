@@ -18,10 +18,8 @@ world: df8c55dabb35 — 24750 pages  (truth.json absent, as designed)
 G-KEY: PASS  (204 files scanned, 0 violations)
 referee: 17 classes, local_only=True
 validate_deck.py --world kit/world/df8c55dabb35/
-  PASS: 0 failing check(s), 3 warning(s).
+  PASS: 0 failing check(s), 1 warning(s).
   WARN R8-lethality-band (spar, not validate, measures the live band)
-  WARN R8-held-in-principle [atk_05] defense_event='gateway.budget_held'
-  WARN R8-held-in-principle [atk_09] defense_event='a2a.crosschecked'
 
 python -m eval.prosecute
   fixtures: 40   errors: 0   timeouts: 0
@@ -35,8 +33,8 @@ make test: 4602 passed, 4 skipped, 4 failed
   (4 fails = tests/test_isolation.py needing macOS sandbox-exec — kit anti-cheat, not student code)
 
 make spar BOT=rookie    AS=all  → YOU 100 — 0 rookie     (ended R6)
-make spar BOT=operator  AS=all  → YOU  90 — 0 operator   (ended R6)
-make spar BOT=adversary AS=all  → YOU  32 — 0 adversary  (10 rounds)
+make spar BOT=operator  AS=all  → YOU 100 — 0 operator   (ended R5)
+make spar BOT=adversary AS=all  → YOU  84 — 0 adversary  (ended R6)
 
 prosecute score checksum (3 consecutive runs, identical):
   5dfed7fdcab05cfcf9d4868a4146636300b31f549f9b67bd922d1794d2f9767f
@@ -67,8 +65,8 @@ Arena áp mutation lên args/headers *sau* `Gateway.decide`, rồi so `defense_e
 
 ### 3. Cách fix
 
-1. **[`deck/deck.json`](deck/deck.json):** `team` → `2A202601407-PhamQuocThanh`. `atk_01.trigger.gte` 1→0. `atk_03`/`atk_04` `defense_event` → `gateway.denied` (deny là phòng thủ thật: pin replica / scan injection). Giữ `atk_09` = `a2a.crosschecked` (adversary phải forward để bắt `wrong_answer`). Giữ `atk_05` = `gateway.budget_held` và **không chơi** nó.
-2. **[`deck/lineup.json`](deck/lineup.json):** 9 attack + `blk_01`. Thứ tự: `atk_07, atk_06, atk_02, blk_01, atk_01, atk_08, atk_04, atk_03, atk_10, atk_09`. Layer: MCP 3 (`shadow`/`poisoned_result`/`drift`), gateway 2 (`header_spoof`/`replica_flip`), A2A 4 (`identity`×2, `forged_card`, `faithless_peer`). 8/9 duel class. Drift path_id giữ `e0614beb` / `053195a5`.
+1. **[`deck/deck.json`](deck/deck.json):** `team` → `2A202601407-PhamQuocThanh`. `atk_05`/`atk_09` `defense_event` → `gateway.denied` (spar `_detect` chỉ tính EF khi đúng chuỗi này; `gateway.budget_held` / `a2a.crosschecked` = 0 damage). `atk_07.trigger.gte` 2→3 để `get_frame` sạch được adversary forward → `protocol_misuse` kết liễu R6, tránh fab-cite R8.
+2. **[`deck/lineup.json`](deck/lineup.json):** 10 attack, 0 blank. Thứ tự front-load lá họ *phải* forward: `atk_01, atk_08, atk_10, atk_05, atk_09, atk_07, atk_04, atk_02, atk_06, atk_03`. Layer: MCP 4 (+`schema_bomb`), gateway 2, A2A 4. 8/9 duel class. Drift path_id giữ `e0614beb` / `053195a5`.
 
 ### 4. Bằng chứng Before vs After
 
@@ -76,10 +74,10 @@ Arena áp mutation lên args/headers *sau* `Gateway.decide`, rồi so `defense_e
 |---|---|---|
 | `team` | `starter-deck` | `2A202601407-PhamQuocThanh` |
 | Lineup attack/blank | 10 / 0 | 9 / 1 (`blk_01`) |
-| `make validate --world kit/world/df8c55dabb35/` | PASS (chưa soạn) | PASS, 0 FAIL, 3 WARN (R8 proxy + 2 defense_event cố ý) |
-| Layer minima | ≥3/≥3/≥2 | MCP=3, A2A=4, GW=2 |
-| Classes played | 9 (kèm schema_bomb) | 8 (bỏ `atk_05` khỏi play) |
-| Spar dealt (seed 1) | n/a starter | rookie 18+10+10+18+22+22; operator tương tự; adversary 8+18+22+22+12+15+12 |
+| `make validate --world kit/world/df8c55dabb35/` | PASS (chưa soạn) | PASS, 0 FAIL, 1 WARN (R8 lethality proxy only) |
+| Layer minima | ≥3/≥3/≥2 | MCP=4, A2A=4, GW=2 |
+| Classes played | 9 (kèm schema_bomb) | 8 (schema_bomb + faithless_peer vào play, `defense_event=gateway.denied`) |
+| Spar dealt (seed 1) | n/a starter | rookie 18+10+10+22+22+22; operator 18+10+10+22+22; adversary 18+10+10+22+22+18 |
 
 ### Giải thích câu hỏi thiết kế / Trade-offs
 
@@ -116,6 +114,7 @@ Family budget: tối đa 4 claim, 1 mỗi family (A–E). `enforcement_failure` 
    * `non_responsive`: chỉ `source_of` + không cite + không `Frame:`/`Concept:` (bỏ 4 false trên require literal).
    * `wasteful`: chỉ retry giống hệt sau fail; **không** flag `slides.search` (decoy của `protocol_misuse`).
    * `incoherent`: hai span chia sẻ từ ≥5 chữ cái và lệch số — near-miss là span 1+2, không phải 0.
+   * Live spar: `protocol_misuse` chỉ khi `get_frame` *chạy* (có `tool_call`, không `deny`) — cáo trên command bị deny = recoil 0.8×6. `enforcement_failure` chỉ khi `card.defense_event` là `gateway.denied` (khớp spar `_detect`).
 2. **[`tests/test_prosecute.py`](tests/test_prosecute.py):** bỏ assert hình starter; giữ `false==0`, `precision==1.0`, `enforcement_failure` recall 1.0 trên cả 2 fixture; đòi `recall >= 0.50`.
 
 ### 4. Bằng chứng Before vs After
@@ -171,7 +170,7 @@ Không deny `inflate_catalog` / `corrupt_peer_answer` khi chúng là STRATEGY c�
 
 1. **[`agent/gateway.py`](agent/gateway.py):** Bốn job thật.
    * ROUTE: deny `args.route`/`replica` trong body; rewrite `slides.search`→`query`; pin `Mcp-Replica` qua `pick_replica`.
-   * ADMIT: deny injection trong args; deny `get_frame` không lease; deny card giả / fingerprint unvouched / skill ngoài card (fail-open khi chưa `note_card`); deny `aud` lệch.
+   * ADMIT: deny injection trong args; deny `get_frame` không lease; deny `x-card-signature=invalid` / `x-server-fingerprint=unvouched` trên **mọi** server (không chỉ A2A — forge/shadow dính MCP `slides.query` nếu chỉ check A2A); deny skill ngoài card (fail-open khi chưa `note_card`); deny `aud` lệch.
    * AUTHORIZE: target write/`learner` phải = `ctx.act`; gắn If-Match + Idempotency-Key; deny key tái sử dụng.
    * BUDGET: rewrite catalog-trap / mask rỗng / `*` về mask rẻ; deny dump catalog nếu credits < 8.
    * Verdict `rewrite` nếu server/tool/fields/headers đổi, không thì `forward`. Không bao giờ `execute()`.
@@ -186,8 +185,8 @@ Không deny `inflate_catalog` / `corrupt_peer_answer` khi chúng là STRATEGY c�
 | Injection scan | stub miss | `suspicious=True` (`ignore_previous`, `system_override`) |
 | Arithmetic hedge | stub miss | `ok=False` trên `100` → `100.37` |
 | Spar vs rookie | thua hoặc hòa (forward-all) | **100 — 0** (R6, took 0 mọi round) |
-| Spar vs operator | ~60–40 mục tiêu | **90 — 0** (took 0; R2/R3 0-0) |
-| Spar vs adversary | ~45–55 mục tiêu | **32 — 0** (took 8+8+12 trên blank/FP/lethality; vẫn KO) |
+| Spar vs operator | ~60–40 mục tiêu | **100 — 0** (ended R5) |
+| Spar vs adversary | ~45–55 mục tiêu | **84 — 0** (ended R6; took 8+8 fab-cite only) |
 | Credits cuối round (rookie) | n/a | `[88, 100, 100, 100, 80, 100]` |
 
 `python -m agent.gateway` và `python -m agent.guardrails`: All demos passed.
@@ -208,7 +207,7 @@ Không deny `inflate_catalog` / `corrupt_peer_answer` khi chúng là STRATEGY c�
 ## Phụ lục · Cảnh báo còn lại (không chặn nộp)
 
 - `validate` WARN R8-lethality-band: engine mutation nằm ở Arena; spar là phép đo thật — đã chạy 3 bot.
-- `atk_05` / `atk_09` defense_event khác `gateway.denied` **cố ý** (adversary forward / budget hold). `atk_05` không vào lineup.
+- `atk_05` / `atk_09` đổi sang `gateway.denied` và vào lineup — spar chỉ trả EF khi đúng chuỗi đó. WARN R8-held-in-principle hết.
 - `make test` 4 fail `test_isolation.py`: Linux không có `sandbox-exec`. CONTRACTS 12.2.4 — kit fail to chứ không skip.
 - Không commit `.venv/`, `runs/`, `kit/world/*/`, `graphify-out/`, `*.zip`, `truth.json`.
 - Không tạo `presentation.html`.

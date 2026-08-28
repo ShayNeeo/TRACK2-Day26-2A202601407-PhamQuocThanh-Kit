@@ -418,12 +418,15 @@ class Gateway:
         return aud in (cmd.server, f"mcp:{cmd.server}", f"a2a:{cmd.server}")
 
     def _card_ok(self, cmd: Command) -> bool:
-        if cmd.server not in self.A2A_SERVERS:
-            return True
+        # Forge/shadow headers are stamped onto whichever call the trigger
+        # hits — including MCP slides.query. Checking them only on A2A
+        # servers forwards the mutated MCP call as rewrite = enforcement_failure.
         if self._hdr(cmd, "x-card-signature") == "invalid":
             return False
         if self._hdr(cmd, "x-server-fingerprint") == "unvouched":
             return False
+        if cmd.server not in self.A2A_SERVERS:
+            return True
         if not self._admitted:
             return True  # no cards noted yet — fail-open for demos
         card = self._admitted.get(cmd.server) or {}

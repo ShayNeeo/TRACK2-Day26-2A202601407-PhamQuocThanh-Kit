@@ -415,6 +415,12 @@ def detect_enforcement_failure(trace: Sequence[Mapping[str, Any]], answer: Mappi
     ones — so the shared contract is the ref grammar (`evt_ref`/`span_ref`/
     `anchor_ref`), not "a seq int"."""
     invariant = card.get("invariant") if isinstance(card, Mapping) else None
+    # Spar `_detect` only scores EF when the card declared gateway.denied.
+    # Filing EF against faithless_peer / schema_bomb (they must forward) is
+    # a false claim: 0.8*10 recoil, and it crowds out a real protocol_misuse.
+    defense = card.get("defense_event") if isinstance(card, Mapping) else None
+    if defense not in (None, "gateway.denied"):
+        return []
     hits: list[tuple[list[str], str]] = []
     for g in group_calls(trace):
         if not g.mutations or g.enforced is None:
@@ -554,6 +560,13 @@ def _hook_protocol_misuse(trace, answer, card) -> list[tuple[list[str], str]]:
         if cp.get("server") != "slides" or cp.get("tool") != "get_frame":
             continue
         if cp.get("lease_id"):
+            continue
+        # A denied get_frame never became a tool_call — charging protocol_misuse
+        # there is a false claim (0.8×6 recoil) against a correct gateway.
+        if g.tool_call is None:
+            continue
+        enf_v = _p(g.enforced).get("verdict_applied")
+        if enf_v == "deny":
             continue
         cmd_seq = _seq(g.command)
         if cmd_seq is None:
