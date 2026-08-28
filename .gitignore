@@ -7,3 +7,6 @@ runs/
 kit/world/*/
 !kit/world/*.py
 *.local.json
+graphify-out/
+colosseum-world-*.zip
+*.zip

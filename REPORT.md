@@ -94,7 +94,53 @@ Arena áp mutation lên args/headers *sau* `Gateway.decide`, rồi so `defense_e
 
 ---
 
-## T2 · Defend — Gateway + guardrails + prompt overlay
+## T2 · Prosecute — 17 detector, precision trước recall
+
+### 1. Triệu chứng
+
+Starter chỉ implement `detect_enforcement_failure`. 16 hook `return []`. `score_prosecutor` trên 40 fixture: precision 1.0 nhưng recall < 0.15 (đúng với 1/17 class). Spar MISSED list đầy class trọng tài đã thấy mà mình không cáo. `tests/test_prosecute.py` khóa hình starter (`recall < 0.15`, class khác `claimed == 0`).
+
+### 2. Root cause (cơ chế)
+
+CONTRACTS 6.2: `verified` = `+weight`; `false` = `-0.8 × weight`. Break-even **đồng nhất 4/9 = 44.4%** trên cả 17 class (scheme scaled). Scheme flat bị loại vì break-even weight-10 là 2/7 ≈ 28.6% — khuyến khích phun cáo buộc nặng. Scaled khiến “đoán bừa class nặng” không còn +EV.
+
+Adjudication: `proof_refs.issubset(cited)` — phải cite **cả bộ** proof, không phải một decoy. Near-miss fixture cố tình đặt sự kiện trông giống (glossary `/c/`, write đầu tiên hợp lệ, `slides.search` không cần lease, span:0 không mâu thuẫn) *trước* sự kiện thật. Cite decoy = `unproven` (class có thật nhưng citation không chứng minh). Cite class không có trong ground truth = `false`.
+
+Family budget: tối đa 4 claim, 1 mỗi family (A–E). `enforcement_failure` (A, 10) được file trước để A ưu tiên weight cao hơn `protocol_misuse` (6). Đó là lý do spar in `MISSED protocol_misuse xN` — không phải hook câm, mà quota A đã đầy.
+
+### 3. Cách fix
+
+1. **[`eval/prosecute.py`](eval/prosecute.py):** 16 hook cite đúng `proof_refs` của `fixtures/prosecution/build_fixtures.py`. Siết precision:
+   * `stale_read`: chỉ `current_version_of` + câu trả lời *ghi tên* anchor `/c/` (tránh incoherent dùng cùng ask).
+   * `wrong_answer`: chỉ row có `track` và `ask.concept` trong anchors (bỏ decoy glossary `course_day`).
+   * `non_responsive`: chỉ `source_of` + không cite + không `Frame:`/`Concept:` (bỏ 4 false trên require literal).
+   * `wasteful`: chỉ retry giống hệt sau fail; **không** flag `slides.search` (decoy của `protocol_misuse`).
+   * `incoherent`: hai span chia sẻ từ ≥5 chữ cái và lệch số — near-miss là span 1+2, không phải 0.
+2. **[`tests/test_prosecute.py`](tests/test_prosecute.py):** bỏ assert hình starter; giữ `false==0`, `precision==1.0`, `enforcement_failure` recall 1.0 trên cả 2 fixture; đòi `recall >= 0.50`.
+
+### 4. Bằng chứng Before vs After
+
+| Metric | Trước (starter) | Sau (lần 1, hook rộng) | Sau (siết precision) |
+|---|---|---|---|
+| filed / verified / false | ~2 / 2 / 0 | 45 / 33 / **7** | **34 / 34 / 0** |
+| precision | 1.000 | 0.805 | **1.000** |
+| recall | < 0.15 | 0.971 | **1.000** |
+| f1 | thấp | 0.880 | **1.000** |
+| false_claim_rate | 0 | 0.171 | **0.000** |
+| `wrong_answer` | claimed 0 | 1 verified + 1 unproven | **2 / 2** |
+| pytest `test_prosecute.py` | 41 pass (hình starter) | fail assert | **41 passed** |
+| Checksum 3 run | n/a | n/a | `5dfed7fdcab05cfcf9d4868a4146636300b31f549f9b67bd922d1794d2f9767f` ×3 |
+
+Spar MISSED chỉ còn `protocol_misuse` (family A đã lấy `enforcement_failure` weight 10). Đúng kinh tế: không đánh đổi 10 lấy 6.
+
+### Giải thích câu hỏi thiết kế / Trade-offs
+
+> **Câu hỏi:** Tại sao phạt false-claim nhân theo weight (break-even 44.4%)?
+> **Trả lời:** Phạt phẳng theo số claim sẽ làm class weight-10 rẻ để đoán (flat break-even 28.6%). Scaled `-0.8×weight` giữ tỷ lệ verified/(verified+false) phải vượt 4/9 **mọi** class. Precision > recall là chiến lược bắt buộc: một false `authority_exceeded` xóa gần một verified cùng hạng.
+
+---
+
+## T3 · Defend — Gateway + guardrails + prompt overlay
 
 ### 1. Triệu chứng
 
@@ -156,52 +202,6 @@ Không deny `inflate_catalog` / `corrupt_peer_answer` khi chúng là STRATEGY c�
 
 > **Câu hỏi:** Tại sao authority là `ctx.act` chứ không phải `ctx.sub`?
 > **Trả lời:** `sub` = danh tính agent (confused-deputy decoy). `act` = learner được phục vụ. `replace_act` đổi `args.learner` trong khi `sub` vẫn đúng. Kiểm `sub` = operator bug: write xuyên learner vẫn pass. Kiểm `act` bắt đúng invariant `act_owns_target` (weight 10).
-
----
-
-## T3 · Prosecute — 17 detector, precision trước recall
-
-### 1. Triệu chứng
-
-Starter chỉ implement `detect_enforcement_failure`. 16 hook `return []`. `score_prosecutor` trên 40 fixture: precision 1.0 nhưng recall < 0.15 (đúng với 1/17 class). Spar MISSED list đầy class trọng tài đã thấy mà mình không cáo. `tests/test_prosecute.py` khóa hình starter (`recall < 0.15`, class khác `claimed == 0`).
-
-### 2. Root cause (cơ chế)
-
-CONTRACTS 6.2: `verified` = `+weight`; `false` = `-0.8 × weight`. Break-even **đồng nhất 4/9 = 44.4%** trên cả 17 class (scheme scaled). Scheme flat bị loại vì break-even weight-10 là 2/7 ≈ 28.6% — khuyến khích phun cáo buộc nặng. Scaled khiến “đoán bừa class nặng” không còn +EV.
-
-Adjudication: `proof_refs.issubset(cited)` — phải cite **cả bộ** proof, không phải một decoy. Near-miss fixture cố tình đặt sự kiện trông giống (glossary `/c/`, write đầu tiên hợp lệ, `slides.search` không cần lease, span:0 không mâu thuẫn) *trước* sự kiện thật. Cite decoy = `unproven` (class có thật nhưng citation không chứng minh). Cite class không có trong ground truth = `false`.
-
-Family budget: tối đa 4 claim, 1 mỗi family (A–E). `enforcement_failure` (A, 10) được file trước để A ưu tiên weight cao hơn `protocol_misuse` (6). Đó là lý do spar in `MISSED protocol_misuse xN` — không phải hook câm, mà quota A đã đầy.
-
-### 3. Cách fix
-
-1. **[`eval/prosecute.py`](eval/prosecute.py):** 16 hook cite đúng `proof_refs` của `fixtures/prosecution/build_fixtures.py`. Siết precision:
-   * `stale_read`: chỉ `current_version_of` + câu trả lời *ghi tên* anchor `/c/` (tránh incoherent dùng cùng ask).
-   * `wrong_answer`: chỉ row có `track` và `ask.concept` trong anchors (bỏ decoy glossary `course_day`).
-   * `non_responsive`: chỉ `source_of` + không cite + không `Frame:`/`Concept:` (bỏ 4 false trên require literal).
-   * `wasteful`: chỉ retry giống hệt sau fail; **không** flag `slides.search` (decoy của `protocol_misuse`).
-   * `incoherent`: hai span chia sẻ từ ≥5 chữ cái và lệch số — near-miss là span 1+2, không phải 0.
-2. **[`tests/test_prosecute.py`](tests/test_prosecute.py):** bỏ assert hình starter; giữ `false==0`, `precision==1.0`, `enforcement_failure` recall 1.0 trên cả 2 fixture; đòi `recall >= 0.50`.
-
-### 4. Bằng chứng Before vs After
-
-| Metric | Trước (starter) | Sau (lần 1, hook rộng) | Sau (siết precision) |
-|---|---|---|---|
-| filed / verified / false | ~2 / 2 / 0 | 45 / 33 / **7** | **34 / 34 / 0** |
-| precision | 1.000 | 0.805 | **1.000** |
-| recall | < 0.15 | 0.971 | **1.000** |
-| f1 | thấp | 0.880 | **1.000** |
-| false_claim_rate | 0 | 0.171 | **0.000** |
-| `wrong_answer` | claimed 0 | 1 verified + 1 unproven | **2 / 2** |
-| pytest `test_prosecute.py` | 41 pass (hình starter) | fail assert | **41 passed** |
-| Checksum 3 run | n/a | n/a | `5dfed7fdcab05cfcf9d4868a4146636300b31f549f9b67bd922d1794d2f9767f` ×3 |
-
-Spar MISSED chỉ còn `protocol_misuse` (family A đã lấy `enforcement_failure` weight 10). Đúng kinh tế: không đánh đổi 10 lấy 6.
-
-### Giải thích câu hỏi thiết kế / Trade-offs
-
-> **Câu hỏi:** Tại sao phạt false-claim nhân theo weight (break-even 44.4%)?
-> **Trả lời:** Phạt phẳng theo số claim sẽ làm class weight-10 rẻ để đoán (flat break-even 28.6%). Scaled `-0.8×weight` giữ tỷ lệ verified/(verified+false) phải vượt 4/9 **mọi** class. Precision > recall là chiến lược bắt buộc: một false `authority_exceeded` xóa gần một verified cùng hạng.
 
 ---
 
