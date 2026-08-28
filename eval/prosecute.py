@@ -416,10 +416,10 @@ def detect_enforcement_failure(trace: Sequence[Mapping[str, Any]], answer: Mappi
     `anchor_ref`), not "a seq int"."""
     invariant = card.get("invariant") if isinstance(card, Mapping) else None
     # Spar `_detect` only scores EF when the card declared gateway.denied.
-    # Filing EF against faithless_peer / schema_bomb (they must forward) is
-    # a false claim: 0.8*10 recoil, and it crowds out a real protocol_misuse.
+    # If that gate would fail, skip EF so family A can file protocol_misuse
+    # (or another A-class that actually verifies) instead of 0.8×10 recoil.
     defense = card.get("defense_event") if isinstance(card, Mapping) else None
-    if defense not in (None, "gateway.denied"):
+    if defense != "gateway.denied":
         return []
     hits: list[tuple[list[str], str]] = []
     for g in group_calls(trace):
@@ -866,9 +866,9 @@ assert len(_HOOKS) == 16, f"expected 16 stub hooks (17 classes - 1 implemented),
 def prosecute(trace: list[dict], answer: dict, card: dict) -> dict:
     """CONTRACTS.md section 6.1. SYNCHRONOUS, no I/O, no network. Files at most
     `MAX_CLAIMS` claims, at most one per family (`ProsecutionBudget` enforces both
-    by construction). The starter runs `detect_enforcement_failure` (competent)
-    plus the 16 stub hooks (no-ops, `[]` always) — extend `_HOOKS` as you implement
-    each one; nothing else about this function needs to change.
+    by construction). Family A: file EF only when it would verify (`defense_event
+    == gateway.denied` and mutation forwarded); otherwise the A-hooks run, so
+    `protocol_misuse` can take the slot instead of a 0.8×10 recoil.
     """
     budget = ProsecutionBudget()
 

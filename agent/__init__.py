@@ -35,6 +35,8 @@ from agent.guardrails import (
     RedactionResult,
     abstention_policy,
     check_grounding,
+    filter_citations,
+    prepare_answer,
     redact,
     scan_for_injected_instructions,
     verify_arithmetic,
@@ -62,6 +64,8 @@ __all__ = [
     # guardrails.py
     "GroundingResult",
     "check_grounding",
+    "filter_citations",
+    "prepare_answer",
     "InjectionScanResult",
     "scan_for_injected_instructions",
     "RedactionResult",

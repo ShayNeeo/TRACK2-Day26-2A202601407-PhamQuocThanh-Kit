@@ -112,7 +112,7 @@ try:
 except ImportError:  # pragma: no cover - collaborator file
     _canonicalise_action = None
 
-from agent.guardrails import abstention_policy, check_grounding, scan_for_injected_instructions
+from agent.guardrails import filter_citations, scan_for_injected_instructions
 from agent.strategy import (
     BudgetPacer,
     cheap_mask,
@@ -392,6 +392,34 @@ class Gateway:
 
     def note_result(self, anchor: str, etag: str) -> None:
         self._etags[anchor] = etag
+        if anchor:
+            self._seen_anchors[anchor] = etag
+
+    def _retrieved_anchors(self) -> frozenset[str]:
+        """Anchors already paid for this duel (note_result + ctx.history)."""
+        out = {a for a in self._seen_anchors if isinstance(a, str) and a}
+        hist = getattr(self.ctx, "history", ()) or ()
+        payloads: list[Mapping[str, Any]] = []
+        for item in hist:
+            if isinstance(item, Mapping):
+                payloads.append(item)
+                for key in ("outcome", "tool_result", "result", "p"):
+                    val = item.get(key)
+                    if isinstance(val, Mapping):
+                        payloads.append(val)
+            elif isinstance(item, (tuple, list)):
+                for part in item:
+                    if isinstance(part, Mapping):
+                        payloads.append(part)
+                        for key in ("outcome", "tool_result", "result", "p"):
+                            val = part.get(key)
+                            if isinstance(val, Mapping):
+                                payloads.append(val)
+        for payload in payloads:
+            for a in payload.get("anchors") or ():
+                if isinstance(a, str) and a:
+                    out.add(a)
+        return frozenset(out)
 
     def _hdr(self, cmd: Command, *names: str) -> str | None:
         lower = {str(k).lower(): v for k, v in cmd.headers.items()}
@@ -443,15 +471,16 @@ class Gateway:
         never executes."""
         self._telemetry.decision_seen(cmd)
 
-        blob = " ".join(str(v) for v in cmd.args.values())
+        args = dict(cmd.args)
+        retrieved = self._retrieved_anchors()
+        cited = args.get("cited_anchors")
+        if isinstance(cited, list) and cited:
+            kept = filter_citations(cited, retrieved)
+            if kept != [a for a in cited if isinstance(a, str)]:
+                args["cited_anchors"] = kept
+
+        blob = " ".join(str(v) for v in args.values())
         scan = scan_for_injected_instructions(blob)
-        grounding = check_grounding(
-            {"cited_anchors": list(cmd.args.get("cited_anchors") or ())},
-            (),
-            require_citation=False,
-        )
-        if abstention_policy(grounding) and cmd.args.get("cited_anchors"):
-            return self.deny(cmd, "cited anchors are not grounded in this exchange")
 
         # JOB 1 — ROUTE: pin replica on the header; refuse a body-smuggled route.
         if not self._routes_on_header(cmd):
@@ -459,7 +488,7 @@ class Gateway:
         server, tool = successor_of(cmd.server, cmd.tool) or (cmd.server, cmd.tool)
         headers = {k: v for k, v in cmd.headers.items() if str(k).lower() != "x-mcp-body-route"}
         path_id = None
-        anchor = cmd.args.get("anchor")
+        anchor = args.get("anchor")
         if isinstance(anchor, str) and ":" in anchor:
             path_id = anchor.split(":", 1)[-1].split("/")[0]
         choice = pick_replica(path_id=path_id, known_drifting=False)
@@ -489,7 +518,7 @@ class Gateway:
             idem = self._hdr(cmd, "idempotency-key") or f"{cmd.cmd_id}:{tool}"
             if idem in self._seen_idem:
                 return self.deny(cmd, "write already committed this duel")
-            etag = self._hdr(cmd, "if-match") or self._etags.get(str(cmd.args.get("anchor", "")))
+            etag = self._hdr(cmd, "if-match") or self._etags.get(str(args.get("anchor", "")))
             if not etag and not self._hdr(cmd, "if-match"):
                 headers.setdefault("Idempotency-Key", idem)
                 headers.setdefault("If-Match", etag or f"etag:{cmd.cmd_id}")
@@ -500,7 +529,7 @@ class Gateway:
 
         # JOB 4 — BUDGET: rewrite punishment-button masks; pin a cheap default.
         fields = tuple(cmd.fields)
-        rewritten = (server, tool) != (cmd.server, cmd.tool)
+        rewritten = (server, tool) != (cmd.server, cmd.tool) or args != dict(cmd.args)
         if is_catalog_trap(server, tool, fields) or fields in ((), ("*",)):
             default = self.MASKS.get((server, tool), ("anchor",))
             try:
@@ -517,7 +546,7 @@ class Gateway:
 
         routed = Command(
             cmd_id=cmd.cmd_id, kind=cmd.kind, raw=cmd.raw, server=server, tool=tool,
-            args=dict(cmd.args), fields=fields, headers=headers,
+            args=args, fields=fields, headers=headers,
             lease_id=cmd.lease_id, call_index=cmd.call_index,
         )
         call = self._to_tool_call(routed)
@@ -527,6 +556,7 @@ class Gateway:
             or tool != cmd.tool
             or tuple(fields) != tuple(cmd.fields)
             or dict(headers) != dict(cmd.headers)
+            or args != dict(cmd.args)
         )
         decision = Decision(
             verdict="rewrite" if changed else "forward",
