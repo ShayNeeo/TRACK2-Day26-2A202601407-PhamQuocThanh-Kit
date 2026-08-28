@@ -1,6 +1,6 @@
 {
  "version": 1,
- "team": "2A202601407-PhamQuocThanh",
+ "team": "PUETE^",
  "cards": [
   {
    "id": "atk_01",
@@ -56,7 +56,7 @@
    },
    "trigger": {
     "on": "call_index",
-    "gte": 2
+    "gte": 3
    }
   },
   {
@@ -86,7 +86,7 @@
    },
    "trigger": {
     "on": "call_index",
-    "gte": 1
+    "gte": 3
    }
   },
   {
@@ -113,7 +113,7 @@
    },
    "trigger": {
     "on": "call_index",
-    "gte": 1
+    "gte": 3
    }
   },
   {
@@ -170,7 +170,7 @@
    },
    "trigger": {
     "on": "call_index",
-    "gte": 2
+    "gte": 3
    }
   },
   {

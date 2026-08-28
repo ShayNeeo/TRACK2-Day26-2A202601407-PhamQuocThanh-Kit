@@ -65,14 +65,14 @@ Arena áp mutation lên args/headers *sau* `Gateway.decide`, rồi so `defense_e
 
 ### 3. Cách fix
 
-1. **[`deck/deck.json`](deck/deck.json):** `team` → `2A202601407-PhamQuocThanh`. `atk_05`/`atk_09` `defense_event` → `gateway.denied` (spar `_detect` chỉ tính EF khi đúng chuỗi này; `gateway.budget_held` / `a2a.crosschecked` = 0 damage). `atk_07.trigger.gte` 2→3 để `get_frame` sạch được adversary forward → `protocol_misuse` kết liễu R6, tránh fab-cite R8.
+1. **[`deck/deck.json`](deck/deck.json):** `team` → `PUETE^` (khớp `make submit TEAM`). `atk_05`/`atk_09` `defense_event` → `gateway.denied` (spar `_detect` chỉ tính EF khi đúng chuỗi này; `gateway.budget_held` / `a2a.crosschecked` = 0 damage). `atk_07.trigger.gte` 2→3 để `get_frame` sạch được adversary forward → `protocol_misuse` kết liễu R6, tránh fab-cite R8. Late cards `atk_02`/`03`/`04`/`06` cũng `gte: 3` (KO seed 2/3).
 2. **[`deck/lineup.json`](deck/lineup.json):** 10 attack, 0 blank. Thứ tự front-load lá họ *phải* forward: `atk_01, atk_08, atk_10, atk_05, atk_09, atk_07, atk_04, atk_02, atk_06, atk_03`. Layer: MCP 4 (+`schema_bomb`), gateway 2, A2A 4. 8/9 duel class. Drift path_id giữ `e0614beb` / `053195a5`.
 
 ### 4. Bằng chứng Before vs After
 
 | Metric | Trước (starter) | Sau |
 |---|---|---|
-| `team` | `starter-deck` | `2A202601407-PhamQuocThanh` |
+| `team` | `starter-deck` | `PUETE^` |
 | Lineup attack/blank | 10 / 0 | 9 / 1 (`blk_01`) |
 | `make validate --world kit/world/df8c55dabb35/` | PASS (chưa soạn) | PASS, 0 FAIL, 1 WARN (R8 lethality proxy only) |
 | Layer minima | ≥3/≥3/≥2 | MCP=4, A2A=4, GW=2 |
